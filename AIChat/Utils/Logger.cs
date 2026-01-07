@@ -36,9 +36,9 @@ namespace AIChatMod.Utils {
                 }
             }
 
-            public void LogInfo(string message) => _logSource.LogInfo($"[INFO] {message}");
-            public void LogWarning(string message) => _logSource.LogWarning($"[WARNING] {message}");
-            public void LogError(string message) => _logSource.LogError($"[ERROR] {message}");
+            public void LogInfo(string message) => _logSource.LogInfo(message);
+            public void LogWarning(string message) => _logSource.LogWarning(message);
+            public void LogError(string message) => _logSource.LogError(message);
         }
 #else
         public static void Init()
