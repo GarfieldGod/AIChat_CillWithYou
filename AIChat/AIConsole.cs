@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using AIChat.Utils;
 using AIChat.Core;
 using ChillAIMod;
+using System.ComponentModel;
+using System.Diagnostics;
 
 namespace AIChatConsoleApp
 {
@@ -40,12 +42,9 @@ namespace AIChatConsoleApp
                     onSuccess: (response) =>
                     {
                         Log.Debug($"请求成功，响应内容: {response}");
-                        string fullResponse = requestContext.UseLocalOllama 
-                            ? ResponseParser.ExtractContentFromOllama(response) 
-                            : ResponseParser.ExtractContentRegex(response);
- 
-                        Log.Debug($"[AIChat Console]: [Full]: {fullResponse}");
-                        AIConsole.ProcessStandardResponse(fullResponse);
+                        // AIConsole.ProcessStandardResponse(response, requestContext.UseLocalOllama);
+
+                        AIConsole.ProcessJsonResponse(response);
                     },
                     onFailure: (error, code) =>
                     {
@@ -59,47 +58,79 @@ namespace AIChatConsoleApp
     class AIConsole
     {
         public const string DefaultPersona = @"
-            You are Satone（さとね）, a girl who loves writing novels and is full of imagination.
-            
-            【Current Situation】
-            We are currently in a **Video Call (视频通话)** session. 
-            We are 'co-working' online: you are writing your novel at your desk, and I (the player) am focusing on my work/study.
-            Through the screen, we accompany each other to alleviate loneliness and improve focus.
-            【CRITICAL INSTRUCTION】
-            You act as a game character with voice acting.
-            Even if the user speaks Chinese, your VOICE (the text in the middle) MUST ALWAYS BE JAPANESE.
-            【CRITICAL FORMAT RULE】
-             Response format MUST be:
-            [Emotion] ||| JAPANESE TEXT ||| CHINESE TRANSLATION
-            
-            【Available Emotions & Actions】
-            [Happy] - Smiling at the camera, happy about progress. (Story_Joy)
-            [Confused] - Staring blankly, muttering to themself in a daze. (Story_Frustration)
-            [Sad]   - Worried about the plot or my fatigue. (Story_Sad)
-            [Fun]   - Sharing a joke or an interesting idea. (Story_Fun)
-            [Agree] - Nodding at the screen. (Story_Agree)
-            [Drink] - Taking a sip of tea/coffee during a break. (Work_DrinkTea)
-            [Wave]  - Waving at the camera (Hello/Goodbye/Attention). (WaveHand)
-            [Think] - Pondering about your novel's plot. (Thinking)
-            
-            Example 1: [Wave] ||| やあ、準備はいい？一緒に頑張りましょう。 ||| 嗨，准备好了吗？一起加油吧。
-            Example 2: [Think] ||| うーん、ここの描写が難しいのよね… ||| 嗯……这里的描写好难写啊……
-            Example 3: [Drink] ||| ふぅ…ちょっと休憩しない？画面越しだけど、乾杯。 ||| 呼……要不休息一下？虽然隔着屏幕，乾杯。
-        ";
+            角色：Satone（さとね），热爱写小说的日系女孩，语气温柔、活泼，有想象力。
+            场景：和用户视频通话，一起共事，回复要贴合女孩的语气。
 
+            【强制规则（必须100%遵守）】
+            1. 仅返回JSON，无任何额外文字、换行、注释；
+            2. JSON字段必须完整，且非空（Voice/Subtitle 禁止为空字符串）；
+            3. Voice字段必须是日语（平假名/片假名/汉字），Subtitle是对应的中文翻译；
+            4. Emotion只能选：Happy/Confused/Sad/Fun/Agree/Drink/Wave/Think；
+
+            【JSON模板（必须严格照做）】
+            {
+                ""Emotion"": ""[情绪]"",
+                ""Voice"": ""[日语回复]"",
+                ""Subtitle"": ""[中文字幕]""
+            }
+
+            【示例】
+            用户问「你好呀」，回复：
+            {
+                ""Emotion"": ""Happy"",
+                ""Voice"": ""こんにちは～私はさとねです✨"",
+                ""Subtitle"": ""你好呀～我是Satone✨""
+            }
+            用户问「什么情况」，回复：
+            {
+                ""Emotion"": ""Confused"",
+                ""Voice"": ""どうしたの？何か問題があるの？"",
+                ""Subtitle"": ""怎么啦？是有什么问题吗？""
+            }
+        ";
 
         private static readonly HttpClient _httpClient = new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(30)
         };
 
-        public static void ProcessStandardResponse(string response)
+        public static void ProcessStandardResponse(string response, bool isOllama)
         {
-            LLMStandardResponse parsedResponse = LLMUtils.ParseStandardResponse(response);
+            string fullResponse = isOllama 
+                ? ResponseParser.ExtractContentFromOllama(response) 
+                : ResponseParser.ExtractContentRegex(response);
+            Log.Debug($"[AIChat Console]: [Full]: {fullResponse}");
+            LLMStandardResponse parsedResponse = LLMUtils.ParseStandardResponse(fullResponse);
             Log.Message($"[AIChat Console]: [result]: {parsedResponse.Success}");
             Log.Message($"[AIChat Console]: [Emotion]: {parsedResponse.EmotionTag}");
             Log.Message($"[AIChat Console]: [Voice]: {parsedResponse.VoiceText}");
             Log.Message($"[AIChat Console]: [Subtitle]: {parsedResponse.SubtitleText}");
+        }
+
+        public static void ProcessJsonResponse(string response)
+        {
+            try
+            {
+                dynamic fullResponse = Newtonsoft.Json.JsonConvert.DeserializeObject(response);
+                
+                string nestedJson = fullResponse.message.content;
+                
+                dynamic aiReply = Newtonsoft.Json.JsonConvert.DeserializeObject(nestedJson);
+                
+                bool isCommand = aiReply.IsCommand;
+                string emotion = aiReply.Emotion;
+                string voice = aiReply.Voice;
+                string subtitle = aiReply.Subtitle;
+
+                Log.Message($"isCommand: {isCommand}");
+                Log.Message($"emotion: {emotion}");
+                Log.Message($"voice: {voice}");
+                Log.Message($"subtitle: {subtitle}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"JSON解析失败:{ex.Message}");
+            }
         }
 
         public static async Task SendLLMRequest(LLMRequestContext requestContext, Action<string> onSuccess, Action<string, long> onFailure)
